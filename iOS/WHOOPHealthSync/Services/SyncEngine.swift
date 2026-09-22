@@ -1,4 +1,5 @@
 import Foundation
+import HealthKit
 import WHOOPHealthSyncCore
 
 protocol WhoopAPIProviding {
@@ -100,8 +101,12 @@ final class HistoryImporter {
         try Task.checkCancellation()
         guard canContinue() else { throw CancellationError() }
         summary.recovery = try await syncRecovery()
-        if ![.completed, .historyLimited, .disabled, .requiresIOS27].contains(summary.recovery.status) || summary.recovery.pending > 0 {
-            summary.errors.append("Recovery HRV could not complete; check Health access or retry.")
+        if summary.recovery.status == .readUnverified || summary.recovery.deferredAccess > 0 {
+            summary.errors.append(String(localized: "Recovery HRV could not complete; check Health access or retry."))
+        } else if summary.recovery.pending > 0 {
+            summary.errors.append(String(localized: "Some recovery scores are still pending. Resume the historical import later to import them."))
+        } else if summary.recovery.status == .historyPending {
+            summary.errors.append(String(localized: "Recovery history is incomplete; resume the historical import."))
         }
         let recovery = try repository.recoveryState()
         if [.completed, .historyLimited, .disabled, .requiresIOS27].contains(summary.recovery.status) &&
@@ -534,7 +539,11 @@ final class SyncEngine {
                 if Self.isGlobalFailure(error) {
                     throw error
                 }
-                let message = "Frecuencia cardiaca \(WhoopAPIClient.isoString(chunk.start))-\(WhoopAPIClient.isoString(chunk.end)): \(Self.message(error))"
+                let start = WhoopAPIClient.isoString(chunk.start)
+                let end = WhoopAPIClient.isoString(chunk.end)
+                let message = Self.isProtectedHealthDataError(error)
+                    ? String(format: String(localized: "Heart rate %1$@–%2$@: unlock the iPhone and resume. Health data is unavailable while the device is locked."), start, end)
+                    : String(format: String(localized: "Heart rate %1$@–%2$@: %3$@"), start, end, Self.message(error))
                 summary.errors.append(message)
                 recordEvent(runID: runID, level: "error", category: "hr", message: message)
                 AppLog.heartRate.error("\(message, privacy: .public)")
@@ -593,6 +602,11 @@ final class SyncEngine {
         case .invalidURL, .invalidHTTPResponse:
             return false
         }
+    }
+
+    private static func isProtectedHealthDataError(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        return nsError.domain == HKError.errorDomain && nsError.code == HKError.Code.errorDatabaseInaccessible.rawValue
     }
 
     private static func isGlobalFailure(_ error: Error) -> Bool {

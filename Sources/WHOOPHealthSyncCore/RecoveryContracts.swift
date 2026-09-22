@@ -51,7 +51,7 @@ public enum WhoopPrivateRecoveryAdapter {
         let linked = sleeps.filter { $0["activity_id"] as? String == sleepID }
         guard linked.count == 1, let nap = flag(linked[0]["is_nap"]), !nap,
               let range = WhoopPayloadAdapters.timeRange(from: linked[0]["during"]),
-              let zone = try sourceZone(record: record, sleep: linked[0], cycle: cycle, sleepID: sleepID),
+              let zone = sourceZone(record: record, sleep: linked[0], cycle: cycle, sleepID: sleepID),
               let updated = WhoopDateCodec.date(from: recovery["updated_at"]),
               let calibrating = flag(recovery["calibrating"]) else { throw RecoverySyncError.invalidTemporalAssociation }
         guard let seconds = recovery["hrv_rmssd"] as? NSNumber,
@@ -77,15 +77,15 @@ public enum WhoopPrivateRecoveryAdapter {
         if CFGetTypeID(n) == CFBooleanGetTypeID() { return n.boolValue }
         if n.doubleValue == 0 { return false }; if n.doubleValue == 1 { return true }; return nil
     }
-    private static func sourceZone(record: [String: Any], sleep: [String: Any], cycle: [String: Any], sleepID: String) throws -> TimeZone? {
+    private static func sourceZone(record: [String: Any], sleep: [String: Any], cycle: [String: Any], sleepID: String) -> TimeZone? {
         let activities = record["v2_activities"] as? [[String: Any]] ?? []
         let linked = activities.filter { activity in
             ["id", "source_id", "activity_v1_id"].contains { activity[$0] as? String == sleepID }
         }
         let zones = Set(linked.compactMap { $0["timezone"] as? String })
-        guard zones.count <= 1 else { throw RecoverySyncError.invalidTemporalAssociation }
-        if let name = zones.first {
-            guard let zone = TimeZone(identifier: name) else { throw RecoverySyncError.invalidTemporalAssociation }
+        // One IANA zone preserves daylight-saving rules. Travel can attach a second activity
+        // in another zone to the same sleep; the sleep's own offset is then the day boundary.
+        if zones.count == 1, let name = zones.first, let zone = TimeZone(identifier: name) {
             return zone
         }
         return offsetZone(sleep["timezone_offset"] ?? cycle["timezone_offset"])

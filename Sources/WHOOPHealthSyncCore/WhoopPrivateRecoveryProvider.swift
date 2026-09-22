@@ -49,10 +49,11 @@ import CoreFoundation
                 guard duration > 60 else { throw RecoverySyncError.providerContractUnverified }
                 duration /= 2; continue
             }
-            let records = try decode(raw, userID: id).filter { $0.representedDate >= start && $0.representedDate <= cutoff }
+            let decoded = try decode(raw, userID: id)
+            let records = decoded.items.filter { $0.representedDate >= start && $0.representedDate <= cutoff }
             let finished = lower == start
             let next = finished ? nil : try JSONEncoder().encode(Cursor(end: lower, start: start, cutoff: cutoff, account: accountKey)).base64EncodedString()
-            return RecoveryPage(records: records, nextCursor: next, endOfHistoryVerified: false, declaredScopeComplete: finished)
+            return RecoveryPage(records: records, nextCursor: next, endOfHistoryVerified: false, declaredScopeComplete: finished, skippedUnverified: decoded.skipped)
         }
     }
     public func recentRecords(accountKey: String, window: TimeRange) async throws -> [WhoopRecovery] {
@@ -87,7 +88,7 @@ import CoreFoundation
             let right = try await records(userID: userID, window: TimeRange(start: middle, end: window.end), depth: depth + 1, budget: budget)
             return try unique(left + right)
         }
-        return try decode(raw, userID: userID)
+        return try decode(raw, userID: userID).items
     }
     private func fetchRecords(_ userID: String, _ window: TimeRange) async throws -> [[String: Any]] {
         if let date = try state().providerRetryNotBefore, date > Date() { throw RecoverySyncError.rateLimited(until: date) }
@@ -98,8 +99,9 @@ import CoreFoundation
             throw RecoverySyncError.rateLimited(until: date)
         }
     }
-    private func decode(_ records: [[String: Any]], userID: String) throws -> [WhoopRecovery] {
+    private func decode(_ records: [[String: Any]], userID: String) throws -> (items: [WhoopRecovery], skipped: Int) {
         var result: [WhoopRecovery] = []
+        var skipped = 0
         for record in records {
             try Task.checkCancellation()
             // No recovery object means no available recovery to fabricate; the recent window discovers it if it later appears.
@@ -108,9 +110,19 @@ import CoreFoundation
                       let id = cycle["user_id"] as? NSNumber, CFGetTypeID(id) != CFBooleanGetTypeID(), id.stringValue == userID else { throw RecoverySyncError.accountMismatch }
                 continue
             }
-            result.append(try WhoopPrivateRecoveryAdapter.decode(record: record, expectedUserID: userID))
+            do {
+                result.append(try WhoopPrivateRecoveryAdapter.decode(record: record, expectedUserID: userID))
+            } catch let error as RecoverySyncError {
+                switch error {
+                case .invalidTemporalAssociation, .invalidRecord, .providerContractUnverified:
+                    // One unverifiable night must not stop the week behind it.
+                    skipped += 1
+                default:
+                    throw error
+                }
+            }
         }
-        return try unique(result)
+        return (try unique(result), skipped)
     }
     private func unique(_ records: [WhoopRecovery]) throws -> [WhoopRecovery] {
         var selected: [String: WhoopRecovery] = [:]

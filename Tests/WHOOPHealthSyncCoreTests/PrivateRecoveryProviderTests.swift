@@ -114,6 +114,21 @@ import XCTest
         do { _ = try await provider.recentRecords(accountKey: key, window: window); XCTFail() }
         catch { XCTAssertEqual(error as? RecoverySyncError, .accountMismatch) }
     }
+    func testOneUnverifiedNightDoesNotStopTheRestOfThePage() async throws {
+        var state = RecoverySyncState(); state.historyStartDate = start
+        let cutoff = start.addingTimeInterval(8*86400)
+        let good = fixture(cycle: 7, end: cutoff.addingTimeInterval(-3600))
+        var nap = fixture(cycle: 8, end: cutoff.addingTimeInterval(-2*3600))
+        var sleep = nap["sleeps"] as! [[String: Any]]
+        sleep[0]["is_nap"] = true
+        nap["sleeps"] = sleep
+        let provider = WhoopPrivateRecoveryProvider(currentUserID: { "123" }, fetch: { _, _ in [good, nap] }, state: { state }, commitState: { state = $0 })
+        let page = try await provider.historicalPage(accountKey: key, cutoff: cutoff, cursor: nil)
+        XCTAssertEqual(page.records.count, 1)
+        XCTAssertEqual(page.records.first?.cycleID, "7")
+        XCTAssertEqual(page.skippedUnverified, 1)
+        XCTAssertNotNil(page.nextCursor)
+    }
     func testDuplicateRecordsSelectLatestRevisionAndRejectConflictingEqualRevision() async throws {
         var state = RecoverySyncState(); state.historyStartDate = start
         let end = start.addingTimeInterval(86400)

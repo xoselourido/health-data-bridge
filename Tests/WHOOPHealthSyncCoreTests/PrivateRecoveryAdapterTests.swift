@@ -62,7 +62,7 @@ final class PrivateRecoveryAdapterTests: XCTestCase {
         XCTAssertTrue(item.userCalibrating); XCTAssertThrowsError(try item.fingerprint())
         XCTAssertThrowsError(try WhoopPrivateRecoveryAdapter.decode(record: record(calibrating: 2), expectedUserID: "123"))
     }
-    func testMatchedIANAActivityZonePreservesDSTAndRejectsAmbiguousSourceZones() throws {
+    func testMatchedIANAActivityZonePreservesDSTAndConflictingZonesUseSleepOffset() throws {
         var payload = record()
         payload["v2_activities"] = [["id": "sleep-id", "timezone": "Europe/Madrid"], ["id": "different-sleep", "timezone": "America/New_York"]]
         let item = try WhoopPrivateRecoveryAdapter.decode(record: payload, expectedUserID: "123")
@@ -71,7 +71,13 @@ final class PrivateRecoveryAdapterTests: XCTestCase {
         XCTAssertEqual(zone.secondsFromGMT(for: try XCTUnwrap(WhoopDateCodec.date(from: "2026-01-01T00:00:00Z"))), 3600)
         XCTAssertEqual(zone.secondsFromGMT(for: item.representedDate), 7200)
         payload["v2_activities"] = [["id": "sleep-id", "timezone": "Europe/Madrid"], ["source_id": "sleep-id", "timezone": "Europe/London"]]
-        XCTAssertThrowsError(try WhoopPrivateRecoveryAdapter.decode(record: payload, expectedUserID: "123"))
+        let traveled = try WhoopPrivateRecoveryAdapter.decode(record: payload, expectedUserID: "123")
+        XCTAssertEqual(TimeZone(identifier: traveled.sourceTimeZoneID)?.secondsFromGMT(), 2 * 3600)
+        payload["sleeps"] = [["activity_id": "sleep-id", "is_nap": false,
+            "during": "[\"2026-08-14T23:00:00Z\",\"2026-08-15T07:00:00Z\")", "timezone_offset": "not-a-zone"]]
+        XCTAssertThrowsError(try WhoopPrivateRecoveryAdapter.decode(record: payload, expectedUserID: "123")) {
+            XCTAssertEqual($0 as? RecoverySyncError, .invalidTemporalAssociation)
+        }
     }
     func testUnknownOffsetAndBooleanIDsCannotBeValidated() {
         XCTAssertThrowsError(try WhoopPrivateRecoveryAdapter.decode(record: record(offset: "+99:99"), expectedUserID: "123"))
