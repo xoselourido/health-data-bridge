@@ -97,11 +97,16 @@ public enum RecoveryRunMode: Sendable { case recent, history }
                 case .invalidRecord, .invalidTemporalAssociation, .providerContractUnverified:
                     // A missing/changed historical record must not starve discovery of valid recent data.
                     // Retain the WAL: a previous HealthKit save may still need reconciliation.
+                    // Without a journal, the night cannot be written and must not keep the import unfinished.
                     let identifier = "whoop-rmssd:\(accountKey):\(cycleID)"
                     let pending = state.pendingItems[cycleID]
                     let range = pending?.range ?? state.pendingOperations[identifier]?.sourceQueryRange
-                    state.pendingItems[cycleID] = RecoveryPendingItem(cycleID: cycleID,
-                        firstDetectedAt: pending?.firstDetectedAt ?? now, reason: "contract", range: range)
+                    if state.pendingOperations[identifier] != nil {
+                        state.pendingItems[cycleID] = RecoveryPendingItem(cycleID: cycleID,
+                            firstDetectedAt: pending?.firstDetectedAt ?? now, reason: "contract", range: range)
+                    } else {
+                        state.pendingItems.removeValue(forKey: cycleID)
+                    }
                     lastSummary.invalid += 1
                     try commitProgress(&state)
                     continue
@@ -278,13 +283,19 @@ public enum RecoveryRunMode: Sendable { case recent, history }
             state.pendingItems.removeValue(forKey: item.cycleID)
             state.pendingOperations.removeValue(forKey: item.identifier)
             if decision == .skippedExternal { lastSummary.skippedExternal += 1 } else { lastSummary.unscorable += 1 }
-        case .pending, .invalid, .deferredAccess:
-            let reason = decision == .pending ? "pending_score" : (decision == .invalid ? "contract" : "access")
+        case .pending, .deferredAccess:
+            let reason = decision == .pending ? "pending_score" : "access"
             state.pendingItems[item.cycleID] = RecoveryPendingItem(cycleID: item.cycleID,
                 firstDetectedAt: state.pendingItems[item.cycleID]?.firstDetectedAt ?? now, reason: reason, range: window)
-            if decision == .pending { lastSummary.pending += 1 }
-            else if decision == .invalid { lastSummary.invalid += 1 }
-            else { lastSummary.deferredAccess += 1 }
+            if decision == .pending { lastSummary.pending += 1 } else { lastSummary.deferredAccess += 1 }
+        case .invalid:
+            lastSummary.invalid += 1
+            if state.pendingOperations[item.identifier] != nil {
+                state.pendingItems[item.cycleID] = RecoveryPendingItem(cycleID: item.cycleID,
+                    firstDetectedAt: state.pendingItems[item.cycleID]?.firstDetectedAt ?? now, reason: "contract", range: window)
+            } else {
+                state.pendingItems.removeValue(forKey: item.cycleID)
+            }
         }
     }
 }

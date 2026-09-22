@@ -214,6 +214,21 @@ final class RecoveryPipelineTests: XCTestCase {
         XCTAssertEqual(result.status, .historyLimited)
         XCTAssertEqual(progress.last?.0, 2); XCTAssertTrue(progress.allSatisfy { $0.1 })
     }
+    @MainActor func testUnverifiedPendingNightDoesNotBlockCompletedHistory() async throws {
+        let (s,p,h,e) = system()
+        let bad = recovery("bad", daysAgo: 3)
+        s.state.initialEnumerationComplete = true
+        s.state.historyScopeLimited = true
+        s.state.initialImportCutoff = now
+        s.state.pendingItems[bad.cycleID] = RecoveryPendingItem(cycleID: bad.cycleID, firstDetectedAt: now, reason: "contract", range: bad.sleepRange)
+        p.individualErrors[bad.cycleID] = .invalidTemporalAssociation
+        let result = try await e.run(accountKey: "account", mode: .history, now: now)
+        XCTAssertNil(s.state.pendingItems[bad.cycleID])
+        XCTAssertTrue(s.state.historicalResolved)
+        XCTAssertEqual(result.status, .historyLimited)
+        XCTAssertEqual(result.invalid, 1)
+        XCTAssertEqual(h.saves, 0)
+    }
     @MainActor func testUnavailableJournalOnlyHistoricalRecoveryDoesNotStarveRecentDiscovery() async throws {
         let (s,p,h,e) = system()
         let missing = recovery("missing", daysAgo: 1000)

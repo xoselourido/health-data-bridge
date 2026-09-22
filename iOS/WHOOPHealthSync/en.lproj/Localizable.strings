@@ -113,6 +113,11 @@
 "Recovery HRV skipped" = "Recovery HRV skipped";
 "Recovery history pages" = "Recovery history pages";
 "Unverified recoveries skipped" = "Unverified recoveries skipped";
+"Recovery HRV could not complete; check Health access or retry." = "Recovery HRV could not complete; check Health access or retry.";
+"Some recovery scores are still pending. Resume the historical import later to import them." = "Some recovery scores are still pending. Resume the historical import later to import them.";
+"Recovery history is incomplete; resume the historical import." = "Recovery history is incomplete; resume the historical import.";
+"Heart rate %1$@–%2$@: unlock the iPhone and resume. Health data is unavailable while the device is locked." = "Heart rate %1$@–%2$@: unlock the iPhone and resume. Health data is unavailable while the device is locked.";
+"Heart rate %1$@–%2$@: %3$@" = "Heart rate %1$@–%2$@: %3$@";
 "Read-only recovery validation" = "Read-only recovery validation";
 "Uses the existing WHOOP cycles route and shows field names and types only. Does not request HealthKit access or write health data." = "Uses the existing WHOOP cycles route and shows field names and types only. Does not request HealthKit access or write health data.";
 "Inspect WHOOP recovery schema" = "Inspect WHOOP recovery schema";
