@@ -112,6 +112,7 @@
 "Recovery HRV written" = "Recovery HRV written";
 "Recovery HRV skipped" = "Recovery HRV skipped";
 "Recovery history pages" = "Recovery history pages";
+"Unverified recoveries skipped" = "Unverified recoveries skipped";
 "Read-only recovery validation" = "Read-only recovery validation";
 "Uses the existing WHOOP cycles route and shows field names and types only. Does not request HealthKit access or write health data." = "Uses the existing WHOOP cycles route and shows field names and types only. Does not request HealthKit access or write health data.";
 "Inspect WHOOP recovery schema" = "Inspect WHOOP recovery schema";

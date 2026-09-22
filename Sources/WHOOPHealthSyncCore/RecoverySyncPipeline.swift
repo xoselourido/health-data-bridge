@@ -7,8 +7,11 @@ public struct RecoveryPage: Sendable {
     /// Must come from a validated provider signal, never inferred from an empty list.
     public var endOfHistoryVerified: Bool
     public var declaredScopeComplete: Bool
-    public init(records: [WhoopRecovery], nextCursor: String?, endOfHistoryVerified: Bool, declaredScopeComplete: Bool = false) {
-        self.records = records; self.nextCursor = nextCursor; self.endOfHistoryVerified = endOfHistoryVerified; self.declaredScopeComplete = declaredScopeComplete
+    /// Cycles in this page that could not be placed on a sleep or time zone. The page still advances.
+    public var skippedUnverified: Int
+    public init(records: [WhoopRecovery], nextCursor: String?, endOfHistoryVerified: Bool, declaredScopeComplete: Bool = false, skippedUnverified: Int = 0) {
+        self.records = records; self.nextCursor = nextCursor; self.endOfHistoryVerified = endOfHistoryVerified
+        self.declaredScopeComplete = declaredScopeComplete; self.skippedUnverified = skippedUnverified
     }
 }
 @MainActor public protocol WhoopRecoveryProviding {
@@ -152,6 +155,7 @@ public enum RecoveryRunMode: Sendable { case recent, history }
                 guard !((page.endOfHistoryVerified || page.declaredScopeComplete) && page.nextCursor != nil) else {
                     throw RecoverySyncError.unknownHistoryEnd
                 }
+                lastSummary.invalid += page.skippedUnverified
                 let eligible = page.records.filter { $0.representedDate <= cutoff && seen.insert($0.identifier).inserted }
                 for offset in stride(from: 0, to: eligible.count, by: 32) {
                     let batch = Array(eligible[offset..<min(offset + 32, eligible.count)])

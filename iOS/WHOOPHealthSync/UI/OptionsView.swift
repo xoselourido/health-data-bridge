@@ -352,6 +352,7 @@ struct SyncActivityView: View {
                     metric("Recovery HRV written", summary.recovery.written)
                     metric("Recovery HRV skipped", summary.recovery.skippedExternal)
                     metric("Recovery history pages", summary.recovery.pagesConfirmed)
+                    metric("Unverified recoveries skipped", summary.recovery.invalid)
                     metric("Sleeps downloaded", summary.sleepsDownloaded)
                     metric("Sleeps written", summary.sleepsWritten)
                     metric("Sleeps unchanged", summary.sleepsUnchanged)
