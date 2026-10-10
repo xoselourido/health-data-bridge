@@ -202,7 +202,7 @@ if ! grep -q 'CODE_SIGN_ENTITLEMENTS = WHOOPHealthSync/WHOOPHealthSync.entitleme
   echo "Target is not wired to WHOOPHealthSync.entitlements." >&2
   exit 1
 fi
-if ! grep -q 'PRODUCT_BUNDLE_IDENTIFIER = com.joselourido.WHOOPHealthSync;' "$project_file"; then
+if ! grep -q 'PRODUCT_BUNDLE_IDENTIFIER = com.hawada.HealthDataBridge;' "$project_file"; then
   echo "Unexpected or missing bundle identifier." >&2
   exit 1
 fi
