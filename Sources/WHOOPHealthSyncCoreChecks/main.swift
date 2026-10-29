@@ -14,6 +14,7 @@ struct CoreChecks {
         testHeartRateOwnDifferentResolutionDoesNotBlockWrite()
         testIncrementalPlannerBacksUpOneHeartRateBucket()
         testIncrementalPlannerUsesStoredHeartRateResolutionOverlap()
+        testIncrementalPlannerRevisitsLateArrivingHeartRate()
         testHeartRateChunksCoverWindowWithoutOverlap()
         testSleepQueryWindowIncludesRevisionLookback()
         try testWhoopUserAndCyclePayloadParsing()
@@ -232,10 +233,11 @@ struct CoreChecks {
         let plan = SyncWindowPlanner.makePlan(
             now: now,
             checkpoints: checkpoints,
-            heartRateStepSeconds: 6
+            heartRateStepSeconds: 6,
+            heartRateRevisionLookbackDays: 0
         )
 
-        expect(plan.heartRateWindow == range(494, 1_000), "HR should back up one bucket from the last confirmed checkpoint.")
+        expect(plan.heartRateWindow == range(494, 1_000), "With revision lookback disabled, HR should back up one bucket from the last confirmed checkpoint.")
         expect(plan.sleepDiscoveryWindow == range(400, 1_000), "Sleep should continue from its own checkpoint.")
         expect(plan.isFirstHeartRateSync == false, "HR should not be marked first sync.")
         expect(plan.isFirstSleepSync == false, "Sleep should not be marked first sync.")
@@ -252,10 +254,22 @@ struct CoreChecks {
         let plan = SyncWindowPlanner.makePlan(
             now: now,
             checkpoints: checkpoints,
-            heartRateStepSeconds: 6
+            heartRateStepSeconds: 6,
+            heartRateRevisionLookbackDays: 0
         )
 
         expect(plan.heartRateWindow == range(440, 1_000), "HR should back up by the stored effective resolution when it is wider than the preferred step.")
+    }
+
+    static func testIncrementalPlannerRevisitsLateArrivingHeartRate() {
+        let now = date(1_000_000)
+        let plan = SyncWindowPlanner.makePlan(
+            now: now,
+            checkpoints: SyncCheckpointState(lastHeartRateEnd: date(999_940), lastSleepQueryEnd: date(999_940))
+        )
+        let latePoint = HeartRatePoint(timestamp: date(980_000), bpm: 64, sourceStepSeconds: 6)
+        expect(plan.heartRateWindow.start <= latePoint.timestamp, "The next sync must revisit recent HR that WHOOP uploaded after the previous checkpoint.")
+        expect(plan.heartRateWindow == range(913_600, 1_000_000), "Incremental HR should recheck a bounded 24-hour window.")
     }
 
     static func testHeartRateChunksCoverWindowWithoutOverlap() {

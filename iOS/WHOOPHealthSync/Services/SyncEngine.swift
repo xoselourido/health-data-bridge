@@ -461,6 +461,7 @@ final class SyncEngine {
         guard !chunks.isEmpty else { return summary }
 
         var activeStepSeconds = heartRateStepSeconds
+        var confirmedHeartRateEnd = try repository.checkpoints().lastHeartRateEnd
         for chunk in chunks {
             do {
                 try Task.checkCancellation()
@@ -528,8 +529,11 @@ final class SyncEngine {
                 summary.heartRateRemoved += recordsToDelete.count
                 summary.heartRateWritten += reconciliation.pointsToWrite.count
                 summary.heartRateSkipped += reconciliation.skippedPointCount
-                if !importingHistory { try repository.setHeartRateCheckpoint(chunk.end, resolution: activeStepSeconds) }
-                recordEvent(runID: runID, level: "info", category: "hr.write", message: "Chunk HR: escritas=\(reconciliation.pointsToWrite.count), omitidas=\(reconciliation.skippedPointCount), eliminadas=\(recordsToDelete.count), checkpoint=\(Self.iso(chunk.end)).")
+                if !importingHistory, chunk.end > (confirmedHeartRateEnd ?? .distantPast) {
+                    try repository.setHeartRateCheckpoint(chunk.end, resolution: activeStepSeconds)
+                    confirmedHeartRateEnd = chunk.end
+                }
+                recordEvent(runID: runID, level: "info", category: "hr.write", message: "Chunk HR: escritas=\(reconciliation.pointsToWrite.count), omitidas=\(reconciliation.skippedPointCount), eliminadas=\(recordsToDelete.count), checkpoint=\(confirmedHeartRateEnd.map(Self.iso) ?? "-").")
             } catch {
                 if Self.isGlobalFailure(error) {
                     throw error

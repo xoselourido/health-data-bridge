@@ -8,6 +8,10 @@ Existing installations go directly to their usual Sync now button. Their account
 
 After initial setup, add the Sync WHOOP App Shortcut to your own personal automation if desired. The app has no autonomous background scheduler. Locked-device access can fail safely without advancing checkpoints.
 
+Daily heart-rate sync also rechecks the last 24 hours for points uploaded to WHOOP after a previous sync. Older unfinished progress is still included. Existing samples are reconciled again, so a repeated run does not duplicate confirmed records or replace another app's samples. This bounded recheck does not guarantee that arbitrarily delayed cloud data has arrived; use the explicit historical import for older gaps.
+
+For a day without Apple Watch, see [Backfilling a missed-watch period](BACKFILL.md), including downstream-app verification and Bevel limitations.
+
 ## Optional recovery HRV
 
 A supporting iOS 27 device is required. Recovery **RMSSD in milliseconds** is distinct from the WHOOP recovery score (%) and Apple Health's SDNN type. The import does not convert RMSSD to SDNN.

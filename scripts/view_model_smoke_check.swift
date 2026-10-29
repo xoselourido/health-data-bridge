@@ -91,7 +91,7 @@ struct SyncViewModelSmokeCheck {
         let preview = viewModel.nextSyncPreview(now: date(700_000))
         expect(preview.sleepWindowStart == date(700_000 - 7 * 24 * 60 * 60), "Sleep preview should include the revision lookback window.")
         expect(preview.sleepWindowEnd == date(700_000), "Sleep preview should end at the planned sync time.")
-        expect(preview.heartRateWindowStart == date(698_940), "HR preview should back up by the stored 60-second effective resolution.")
+        expect(preview.heartRateWindowStart == date(700_000 - 86_400), "HR preview should include the recent revision window for late WHOOP uploads.")
         expect(preview.heartRateWindowEnd == date(700_000), "HR preview should end at the planned sync time.")
         expect(!preview.isFirstSleepSync, "Preview should show sleep as incremental after a stored checkpoint.")
         expect(!preview.isFirstHeartRateSync, "Preview should show HR as incremental after a stored checkpoint.")

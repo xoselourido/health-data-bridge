@@ -7,6 +7,8 @@ struct SyncEngineSmokeCheck {
     @MainActor
     static func main() async throws {
         try await testIdempotentManualSync()
+        try await testLateHeartRateBackfillsWithoutDuplicatingAppleWatchData()
+        try await testInterruptedHeartRateRecheckDoesNotRewindCheckpoint()
         try await testHeartRateFailureKeepsSleepCheckpointOnly()
         try await testPartialErrorsAreSanitizedBeforeSummaryAndLogs()
         try await testHeartRateFallbackToMinuteResolution()
@@ -25,7 +27,7 @@ struct SyncEngineSmokeCheck {
         try await testCommonHistoryResumesConfirmedChunks()
         try await testHistoryScopeExpansionIsExplicitAndRetainsRecoveryWork()
         try await testHistoryRecoveryFailureResumesWithoutReplayingWindows()
-        print("SyncEngine smoke check passed (22 scenarios including explicit history, durable resume and live-checkpoint continuity)")
+        print("SyncEngine smoke check passed (including late heart-rate backfill, explicit history, durable resume and live-checkpoint continuity)")
     }
 
     @MainActor
@@ -85,6 +87,51 @@ struct SyncEngineSmokeCheck {
         expect(diagnostics.recentEvents.contains { $0.category == "sleep.write" }, "Sync should persist sleep write events.")
         expect(diagnostics.recentEvents.contains { $0.category == "hr.write" }, "Sync should persist HR write events.")
         expect(diagnostics.recentEvents.allSatisfy { $0.runID != nil }, "Sync events should be associated with a run ID.")
+    }
+
+    @MainActor
+    private static func testLateHeartRateBackfillsWithoutDuplicatingAppleWatchData() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("late-heart-rate-\(UUID()).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let now = Date()
+        let missing = HeartRatePoint(timestamp: now.addingTimeInterval(-7_200), bpm: 64, sourceStepSeconds: 6)
+        let covered = HeartRatePoint(timestamp: now.addingTimeInterval(-7_100), bpm: 66, sourceStepSeconds: 6)
+        let external = ExistingHeartRateSample(id: "apple-watch", range: TimeRange(start: covered.timestamp, end: covered.timestamp.addingTimeInterval(6)),
+            bpm: 65, isOwnedByApp: false, syncIdentifier: nil)
+        let health = FakeHealthData(externalSleep: [], externalHeartRate: [external])
+        let api = FakeWhoopAPI(sleeps: [], heartRatePoints: [])
+        let repo = SyncRepository(fileURL: url)
+        let engine = SyncEngine(api: api, healthKit: health, repository: repo)
+
+        let beforeUpload = try await engine.synchronize()
+        expect(beforeUpload.heartRateDownloaded == 0, "An early cloud response can contain no heart-rate points.")
+        api.heartRatePoints = [missing, covered]
+        let afterUpload = try await engine.synchronize()
+        expect(afterUpload.errors.isEmpty && afterUpload.heartRateDownloaded == 2, "A later run must fetch points older than the prior checkpoint.")
+        expect(afterUpload.heartRateWritten == 1 && afterUpload.heartRateSkipped == 1, "Backfill must write only the missing WHOOP point.")
+        expect(afterUpload.heartRateRemoved == 0, "Backfill must preserve the Apple Watch sample.")
+        let repeated = try await engine.synchronize()
+        expect(repeated.errors.isEmpty && repeated.heartRateWritten == 0, "Rechecking the same recent window must be idempotent.")
+        expect(health.savedHeartRatePointCount == 1, "Three syncs must create only one missing heart-rate record.")
+    }
+
+    @MainActor
+    private static func testInterruptedHeartRateRecheckDoesNotRewindCheckpoint() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("revision-checkpoint-\(UUID()).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let checkpoint = Date().addingTimeInterval(-60)
+        let repo = SyncRepository(fileURL: url)
+        try repo.bindAccountManually(WhoopRecovery.pseudonymousAccountKey(userID: "fake-user"))
+        try repo.setHeartRateCheckpoint(checkpoint, resolution: 60)
+        let api = FakeWhoopAPI(sleeps: [], heartRatePoints: [])
+        api.heartRateErrorAfterRequestCount = 1
+        let engine = SyncEngine(api: api, healthKit: FakeHealthData(externalSleep: [], externalHeartRate: []), repository: repo)
+
+        let summary = try await engine.synchronize()
+        expect(!summary.errors.isEmpty, "The second revision chunk should fail in this fixture.")
+        let after = try repo.checkpoints()
+        expect(after.lastHeartRateEnd == checkpoint, "A completed retrospective chunk must not rewind previously confirmed live progress.")
+        expect(after.lastHeartRateResolution == 60, "Historical rechecks must retain the effective resolution at the live checkpoint.")
     }
 
     @MainActor
@@ -215,8 +262,9 @@ struct SyncEngineSmokeCheck {
         expect(summary.sleepsDownloaded == 2, "Window test should download both sleep activity IDs.")
         expect(summary.sleepsDiscardedOutOfWindow == 1, "Future sleep should be discarded before HealthKit writes.")
         expect(summary.sleepsWritten == 1, "Only in-window sleep should be written.")
-        expect(summary.heartRateDownloaded == 2, "Window test should count raw HR points returned by WHOOP.")
-        expect(summary.heartRateDiscardedOutOfWindow == 1, "Future HR point should be discarded before reconciliation.")
+        let rawPointCount = 2 * api.requestedHeartRateSteps.count
+        expect(summary.heartRateDownloaded == rawPointCount, "Window test should count raw HR points from every revision chunk.")
+        expect(summary.heartRateDiscardedOutOfWindow == rawPointCount - 1, "Only one point belongs to a requested chunk; all other returned points must be discarded.")
         expect(summary.heartRateWritten == 1, "Only in-window HR point should be written.")
     }
 
@@ -711,7 +759,8 @@ struct SyncEngineSmokeCheck {
 
 private final class FakeWhoopAPI: WhoopAPIProviding {
     private let sleeps: [SleepSession]
-    private let heartRatePoints: [HeartRatePoint]
+    var heartRatePoints: [HeartRatePoint]
+    var heartRateErrorAfterRequestCount: Int?
     var unsupportedHeartRateSteps: Set<Int> = []
     var requestedHeartRateSteps: [Int] = []
     var filterHeartRateByRequestWindow = true
@@ -744,6 +793,9 @@ private final class FakeWhoopAPI: WhoopAPIProviding {
 
     func fetchHeartRate(userID: String, start: Date, end: Date, stepSeconds: Int) async throws -> [HeartRatePoint] {
         requestedHeartRateSteps.append(stepSeconds)
+        if let limit = heartRateErrorAfterRequestCount, requestedHeartRateSteps.count > limit {
+            throw WhoopAPIError.http(status: 503, path: "/synthetic-heart-rate", message: "injected revision failure")
+        }
         if let heartRateError {
             throw heartRateError
         }

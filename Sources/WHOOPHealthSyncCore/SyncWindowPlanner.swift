@@ -43,15 +43,22 @@ public enum SyncWindowPlanner {
         checkpoints: SyncCheckpointState,
         firstSyncLookbackDays: Int = 7,
         sleepRevisionLookbackDays: Int = 7,
-        heartRateStepSeconds: Int = 6
+        heartRateStepSeconds: Int = 6,
+        heartRateRevisionLookbackDays: Int = 1
     ) -> IncrementalSyncPlan {
         let firstLookback = TimeInterval(firstSyncLookbackDays * 24 * 60 * 60)
         let revisionLookback = TimeInterval(sleepRevisionLookbackDays * 24 * 60 * 60)
 
         let firstSyncStart = now.addingTimeInterval(-firstLookback)
         let heartRateOverlapSeconds = max(heartRateStepSeconds, checkpoints.lastHeartRateResolution ?? heartRateStepSeconds)
-        let heartRateStart = checkpoints.lastHeartRateEnd?
-            .addingTimeInterval(-TimeInterval(heartRateOverlapSeconds)) ?? firstSyncStart
+        let heartRateRevisionStart = now.addingTimeInterval(
+            -TimeInterval(max(0, heartRateRevisionLookbackDays)) * 24 * 60 * 60
+        )
+        // A successful query does not mean WHOOP has uploaded every recent point yet.
+        // Reconcile a bounded recent window as well as any older unfinished progress.
+        let heartRateStart = checkpoints.lastHeartRateEnd.map {
+            min($0.addingTimeInterval(-TimeInterval(heartRateOverlapSeconds)), heartRateRevisionStart)
+        } ?? firstSyncStart
         let sleepStart = checkpoints.lastSleepQueryEnd ?? firstSyncStart
         let revisionStart = now.addingTimeInterval(-revisionLookback)
 
